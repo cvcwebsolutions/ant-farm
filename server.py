@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Optional local server for the ant farm: lets the colony follow your computer's load and keeps it across reloads.
+"""Optional local server for the ant colony (and the 2D farm): lets the ants follow your computer's load and keeps the
+colony across reloads.
 
     python3 server.py            # then open http://127.0.0.1:8978/
     python3 server.py --port 9000 --bind 0.0.0.0
@@ -7,10 +8,10 @@
 The page works without it too (open it from any static web server: the colony is kept in the browser's
 localStorage and the ants keep a gentle rhythm of their own). With it:
 
-  GET  /            index.html
+  GET  /            the 3D colony (index.html, colony.js, vendor/); /2d/ the 2D glass farm
   GET  /load.json   {"t", "cpu": {"util"}, "gpus": [{"index", "name", "util", "power", "limit"}], "heat"}
-  GET  /state       the saved colony (404 until the page first saves it)
-  POST /state       the page saves its colony every 2 minutes (JSON, at most 2 MB) into ./state/
+  GET  /state       the saved colony: ?name=ant-colony (3D) or no name (2D); 404 until the page first saves it
+  POST /state       the page saves its colony every 2 minutes (JSON, at most 2 MB) into ./state/<name>.json
 
 heat (0..1) = the busiest of: CPU use, and for each NVIDIA GPU (if nvidia-smi is installed) its use and its power
 against its limit. The busier the machine, the more ants are awake and the faster they dig.
@@ -26,12 +27,17 @@ import socketserver
 import subprocess
 import threading
 import time
+import urllib.parse
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.realpath(__file__))
 STATE_DIR = os.environ.get("ANT_FARM_STATE_DIR") or os.path.join(HERE, "state")
 EVERY = 2.0
 STATE = {"t": 0, "cpu": {}, "gpus": [], "heat": 0.0}
 LOCK = threading.Lock()
+STATE_NAMES = ("ant-farm", "ant-colony")
+TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".jpg": "image/jpeg",
+         ".gif": "image/gif", ".png": "image/png", ".mp4": "video/mp4", ".md": "text/plain; charset=utf-8",
+         ".txt": "text/plain; charset=utf-8"}
 
 
 def gpus():
@@ -103,26 +109,39 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _state_file(self):
+        """/state?name=ant-colony (the 3D colony) or /state (the 2D farm); None for anything else."""
+        q = urllib.parse.parse_qs(self.path.partition("?")[2])
+        name = (q.get("name") or ["ant-farm"])[0]
+        return os.path.join(STATE_DIR, name + ".json") if name in STATE_NAMES else None
+
     def do_GET(self):  # noqa: N802
-        path = self.path.partition("?")[0]
-        if path in ("/", "/index.html"):
-            with open(os.path.join(HERE, "index.html"), "rb") as f:
-                self._send(200, f.read(), "text/html; charset=utf-8")
-        elif path == "/load.json":
+        path = urllib.parse.unquote(self.path.partition("?")[0])
+        if path == "/load.json":
             with LOCK:
                 body = json.dumps(STATE).encode()
             self._send(200, body, "application/json")
         elif path == "/state":
+            p = self._state_file()
             try:
-                with open(os.path.join(STATE_DIR, "ant-farm.json"), "rb") as f:
+                with open(p, "rb") as f:
                     self._send(200, f.read(), "application/json")
-            except OSError:
+            except (OSError, TypeError):
                 self._send(404, b"no state yet", "text/plain")
         else:
-            self._send(404, b"not found", "text/plain")
+            # the pages themselves: index.html, colony.js, vendor/, 2d/ (files of this folder only)
+            if path.endswith("/"):
+                path += "index.html"
+            p = os.path.realpath(os.path.join(HERE, path.lstrip("/")))
+            ctype = TYPES.get(os.path.splitext(p)[1])
+            if not ctype or not p.startswith(HERE + os.sep) or os.sep + "state" + os.sep in p or not os.path.isfile(p):
+                return self._send(404, b"not found", "text/plain")
+            with open(p, "rb") as f:
+                self._send(200, f.read(), ctype)
 
     def do_POST(self):  # noqa: N802
-        if self.path.partition("?")[0] != "/state":
+        p = self._state_file()
+        if self.path.partition("?")[0] != "/state" or not p:
             return self._send(404, b"not found", "text/plain")
         n = int(self.headers.get("Content-Length") or 0)
         if n <= 0 or n > 2 * 1024 * 1024:
@@ -132,10 +151,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if json.loads(body).get("v") != 1:
                 raise ValueError("unknown version")
             os.makedirs(STATE_DIR, exist_ok=True)
-            tmp = os.path.join(STATE_DIR, ".ant-farm.json.tmp")
+            tmp = p + ".tmp"
             with open(tmp, "wb") as f:
                 f.write(body)
-            os.replace(tmp, os.path.join(STATE_DIR, "ant-farm.json"))
+            os.replace(tmp, p)
         except (ValueError, OSError, AttributeError):
             return self._send(400, b"bad state", "text/plain")
         self._send(204, b"", "text/plain")
@@ -155,7 +174,7 @@ def main():
     ap.add_argument("--bind", default="127.0.0.1")
     a = ap.parse_args()
     threading.Thread(target=loop, daemon=True).start()
-    print("ant farm on http://%s:%d/" % (a.bind, a.port), flush=True)
+    print("ant colony on http://%s:%d/" % (a.bind, a.port), flush=True)
     Server((a.bind, a.port), Handler).serve_forever()
 
 
