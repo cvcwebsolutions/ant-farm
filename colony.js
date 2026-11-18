@@ -19,7 +19,7 @@
 //
 // Options: fps=N (default 30), heat=X (fixed load), demo=1 (load sweeping), fresh=1 (new colony, nothing loaded or
 // saved), seed=N, grow=X (with fresh: start X of the way to a full nest), shot=<kind> (camera stays on one kind of
-// shot: entrance queen granary brood rest dig follow wide), hour=H (clock hour for day/night), dpr=X, aa=0,
+// shot: entrance queen granary brood rest dig follow wide), zoom=X (shot width factor, default 1.45), hour=H (clock hour for day/night), dpr=X, aa=0,
 // capture=1 (no clock: window.__step(n) runs n frames of 1/30 s, for recording clips).
 import * as THREE from './vendor/three.module.js';
 
@@ -27,6 +27,7 @@ const Q = new URLSearchParams(location.search);
 const qn = (k, d) => { const v = parseFloat(Q.get(k)); return isFinite(v) ? v : d; };
 const FPS = qn('fps', 30), CAPTURE = Q.get('capture') === '1', FRESH = Q.get('fresh') === '1';
 const FORCE_SHOT = Q.get('shot') || '';
+const ZOOM = qn('zoom', 1.45);   // every shot this much wider than the first build's: smaller ants, more of the nest in view
 const R = Math.random, rr = (a, b) => a + (b - a) * R();
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v, lerp = (a, b, t) => a + (b - a) * t;
 const sstep = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
@@ -1458,7 +1459,7 @@ function drawProps(dt) {
 }
 
 // ---------------------------------------------------------------- camera: a slow documentary between busy places
-const cam = { x: 0, y: -2, w: 7, from: null, shot: null, t: 0, hold: 0, trans: 0, last: '' };
+const cam = { x: 0, y: -2, w: 7 * ZOOM, from: null, shot: null, t: 0, hold: 0, trans: 0, last: '' };
 const ease = t => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 function chamberShot(role, w) { const c = chNodes(role); if (!c.length) return null; const n = N[chAt(c[0], 0.5)]; return { x: n.cx, y: n.cy + 0.25, w }; }
 function newShot() {
@@ -1485,8 +1486,8 @@ function newShot() {
     } else if (kind === 'wide') {
       let x0 = 1e9, x1 = -1e9, y0 = 1e9;
       for (let i = S0; i < N.length; i++) if (open(i)) { x0 = Math.min(x0, N[i].cx); x1 = Math.max(x1, N[i].cx); y0 = Math.min(y0, N[i].cy); }
-      const w = clamp(Math.max(x1 - x0 + 4, (0.4 - y0 + 3) * camera.aspect), 6.5, 16.5);
-      s = { x: (x0 + x1) / 2, y: 1.6 - w / camera.aspect / 2, w };
+      const w = clamp(Math.max(x1 - x0 + 4, (0.4 - y0 + 3) * camera.aspect), 6.5 * ZOOM, 16.5); // already at screen width
+      s = { x: (x0 + x1) / 2, y: 1.6 - w / camera.aspect / 2, w: w / ZOOM };
     }
     if (!s) continue;
     s.kind = kind;
@@ -1498,7 +1499,7 @@ function newShot() {
 function shotTarget(s, out) {
   if (s.follow) { const a = s.follow; s.fx = lerp(s.fx === undefined ? a.P.x : s.fx, a.P.x, 0.03); s.fy = lerp(s.fy === undefined ? a.P.y : s.fy, a.P.y, 0.03); out.x = s.fx; out.y = s.fy + (s.meadow ? 0.9 : s.close ? 0.35 : 0.4); }
   else { out.x = s.x; out.y = s.y; }
-  out.w = s.w;
+  out.w = s.w * ZOOM;
   return out;
 }
 const TG = { x: 0, y: 0, w: 0 };
